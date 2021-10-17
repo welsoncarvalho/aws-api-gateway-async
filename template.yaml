@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+
+  AsyncQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: async-queue
+
+  AsyncQueueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: async-queue-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: 
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: async-queue-policy-publish
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt AsyncQueue.Arn
+
+  AsyncApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: stag
+      CorsConfiguration:
+        AllowOrigins:
+          - 'https://*'
+        AllowHeaders:
+          - Content-Type
+          - Accept
+          - '*'
+        AllowMethods:
+          - '*'
+
+  AsyncApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AsyncApi
+      RouteKey: POST /message
+      Target: !Sub 'integrations/${AsyncApiIntegration}'
+
+  AsyncApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AsyncApi
+      Description: Proxy incoming HTTP payload into async queue
+      IntegrationType: AWS_PROXY
+      IntegrationSubtype: SQS-SendMessage
+      PayloadFormatVersion: 1.0
+      CredentialsArn: !GetAtt AsyncQueueRole.Arn
+      RequestParameters:
+        QueueUrl: !Ref AsyncQueue
+        MessageBody: $request.body
